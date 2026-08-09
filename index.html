@@ -136,6 +136,7 @@
             cursor: pointer;
         }
 
+        .status-resume-ready { background: #f5f5f5; color: #616161; }
         .status-applied { background: #e3f2fd; color: #1976d2; }
         .status-online-assessment { background: #fff9c4; color: #f57f17; }
         .status-phone-screen { background: #fff3e0; color: #f57c00; }
@@ -1110,9 +1111,36 @@
         }
 
     </style>
+    <!-- Firebase (compat build, so it shares the same global scope as the classic
+         script below and all the inline onclick="..." handlers in this page) -->
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
+    <style>
+        #authGate {
+            position: fixed; inset: 0; z-index: 9999;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column; gap: 16px; color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        #authGate button {
+            padding: 12px 24px; font-size: 1em; border: none; border-radius: 8px;
+            background: #fff; color: #333; cursor: pointer; font-weight: 600;
+        }
+        #authGate button:hover { background: #f0f0f0; }
+        #authGate.hidden { display: none; }
+        #appRoot.hidden { display: none; }
+    </style>
 </head>
 <body>
-    <div class="container">
+    <div id="authGate">
+        <h2>Job Tracker</h2>
+        <p id="authStatus">正在检查登录状态...</p>
+        <button id="signInBtn" style="display:none;" onclick="window.jtSignIn()">用 Google 账号登录</button>
+    </div>
+    <div class="container" id="appRoot" hidden>
         <div style="position: relative;">
             <h1>📋 Job Application Tracker <span style="font-size: 0.5em; color: #999;">v4.2</span></h1>
             <div class="backup-section-top">
@@ -1193,6 +1221,7 @@
                 </div>
                 <div class="filter-buttons">
                     <button class="filter-btn active" data-status="all" onclick="filterByStatus('all')">All</button>
+                    <button class="filter-btn" data-status="Resume Ready" onclick="filterByStatus('Resume Ready')">Resume Ready</button>
                     <button class="filter-btn" data-status="Applied" onclick="filterByStatus('Applied')">Applied</button>
                     <button class="filter-btn" data-status="Online Assessment" onclick="filterByStatus('Online Assessment')">Online Assessment</button>
                     <button class="filter-btn" data-status="Phone Screen" onclick="filterByStatus('Phone Screen')">Phone Screen</button>
@@ -1307,7 +1336,110 @@
     </div>
 
     <script>
-        // Load applications from localStorage
+        // ============================================================
+        // Firestore backend wiring
+        // Real DB = Firestore collection "applications" in your GCP
+        // project. localStorage is kept only as an offline/instant-paint
+        // cache; Firestore is now the source of truth. Your Python agents
+        // (resume-tailor, email-check) write to the same collection using
+        // job_tracker_client.py, and this page picks up their writes live
+        // via onSnapshot, no manual import needed.
+        // ============================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyAAau-gEt8q62EIzbjz8j2mxe2-H-DA9wE",
+            authDomain: "job-search-504501.firebaseapp.com",
+            projectId: "job-search-504501",
+            storageBucket: "job-search-504501.firebasestorage.app",
+            messagingSenderId: "72713955089",
+            appId: "1:72713955089:web:ab153825edf3d137e5ceb0",
+        };
+        // Only this Google account may read/write (must match firestore.rules)
+        const JT_ALLOWED_EMAIL = "jxlli0205@gmail.com";
+        const JT_COLLECTION = "applications";
+
+        firebase.initializeApp(firebaseConfig);
+        const jtAuth = firebase.auth();
+        const jtDb = firebase.firestore();
+        const jtStorage = firebase.storage();
+        let jtUnsubscribe = null;
+
+        // Opens a resume PDF stored in Firebase Storage (path is stamped
+        // onto the application doc by job_tracker_client.py when
+        // resume-tailor uploads it). getDownloadURL() goes through
+        // storage.rules, so this only works for your own files.
+        window.viewResumePdf = function (storagePath) {
+            jtStorage.ref(storagePath).getDownloadURL()
+                .then(url => window.open(url, '_blank'))
+                .catch(err => alert('打不开简历文件: ' + err.message));
+        };
+
+        window.jtSignIn = function () {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            provider.setCustomParameters({ login_hint: JT_ALLOWED_EMAIL });
+            jtAuth.signInWithPopup(provider).catch(err => {
+                document.getElementById('authStatus').textContent =
+                    '登录失败: ' + err.message;
+            });
+        };
+
+        jtAuth.onAuthStateChanged(user => {
+            const gate = document.getElementById('authGate');
+            const root = document.getElementById('appRoot');
+            const statusEl = document.getElementById('authStatus');
+            const btn = document.getElementById('signInBtn');
+
+            if (jtUnsubscribe) { jtUnsubscribe(); jtUnsubscribe = null; }
+
+            if (user && user.email === JT_ALLOWED_EMAIL) {
+                gate.classList.add('hidden');
+                root.hidden = false;
+                startFirestoreSync();
+            } else {
+                root.hidden = true;
+                gate.classList.remove('hidden');
+                btn.style.display = 'inline-block';
+                statusEl.textContent = user
+                    ? `已登录 ${user.email}，但这个账号不是授权账号，换一个账号登录`
+                    : '请登录你的 Google 账号';
+                if (user) jtAuth.signOut();
+            }
+        });
+
+        // Live two-way sync: any write from this page OR from your Python
+        // agents shows up here automatically, no refresh/import needed.
+        function startFirestoreSync() {
+            jtUnsubscribe = jtDb.collection(JT_COLLECTION)
+                .where('ownerId', '==', jtAuth.currentUser.uid)
+                .onSnapshot(snapshot => {
+                    applications = snapshot.docs.map(doc => doc.data());
+                    localStorage.setItem('jobApplications', JSON.stringify(applications));
+                    renderTable();
+                }, err => {
+                    console.error('Firestore sync error:', err);
+                    alert('同步失败，检查一下 firebaseConfig 和 firestore.rules: ' + err.message);
+                });
+        }
+
+        // Write one record. docId defaults to the record's own id field
+        // (stringified) so this page and your Python agents always agree
+        // on which document is which.
+        function syncAppToFirestore(app) {
+            app.ownerId = jtAuth.currentUser.uid;
+            const docId = String(app.id);
+            jtDb.collection(JT_COLLECTION).doc(docId).set(app, { merge: true })
+                .catch(err => {
+                    console.error('Firestore write failed:', err);
+                    alert('保存到云端失败（本地已经改了，但云端没同步上）: ' + err.message);
+                });
+        }
+
+        function deleteAppFromFirestore(id) {
+            jtDb.collection(JT_COLLECTION).doc(String(id)).delete()
+                .catch(err => console.error('Firestore delete failed:', err));
+        }
+
+        // Instant paint from the last known local cache while we wait for
+        // the first Firestore snapshot to arrive (avoids a blank table).
         let applications = JSON.parse(localStorage.getItem('jobApplications')) || [];
         let currentCalendarDate = new Date(); 
         let currentSearchTerm = '';
@@ -1498,6 +1630,7 @@
 
             applications.unshift(newApp); 
             saveApplications();
+            syncAppToFirestore(newApp);
             renderTable();
             
             // Reset form
@@ -1598,13 +1731,14 @@
                         <td><strong>${highlightText(app.company, currentSearchTerm)}</strong></td>
                         <td>${highlightText(app.position, currentSearchTerm)}</td>
                         <td>${formatDate(app.date)}</td>
-                        <td>${app.resume ? highlightText(app.resume, currentSearchTerm) : '-'}</td>
+                        <td>${app.resume ? highlightText(app.resume, currentSearchTerm) : '-'}${app.resumeStoragePath ? ` <a href="#" onclick="viewResumePdf('${app.resumeStoragePath}'); return false;" title="查看简历PDF">📄</a>` : ''}</td>
                         <td class="link-cell">
                             ${eventDisplay}
                         </td>
                         <td class="status-cell">
                             <select class="status-select status-${app.status.toLowerCase().replace(' ', '-')}" 
                                     onchange="updateStatus(${app.id}, this.value)">
+                                <option value="Resume Ready" ${app.status === 'Resume Ready' ? 'selected' : ''}>Resume Ready</option>
                                 <option value="Applied" ${app.status === 'Applied' ? 'selected' : ''}>Applied</option>
                                 <option value="Online Assessment" ${app.status === 'Online Assessment' ? 'selected' : ''}>Online Assessment</option>
                                 <option value="Phone Screen" ${app.status === 'Phone Screen' ? 'selected' : ''}>Phone Screen</option>
@@ -1654,6 +1788,7 @@
                          }
                     }
                     saveApplications();
+                    syncAppToFirestore(app);
                     renderTable(); // Re-render to apply 'Rejected' sorting immediately
                 }
             }
@@ -1663,6 +1798,7 @@
             if (confirm('Are you sure you want to delete this application?')) {
                 applications = applications.filter(a => a.id !== id);
                 saveApplications();
+                deleteAppFromFirestore(id);
                 renderTable();
             }
         }
@@ -1698,8 +1834,9 @@
                     'Phone Screen': 2,
                     'Online Assessment': 3,
                     'Offer': 4,
-                    'Applied': 5,
-                    'Rejected': 6
+                    'Resume Ready': 5,
+                    'Applied': 6,
+                    'Rejected': 7
                 };
                 
                 const priorityA = statusPriority[a.status] || 999;
@@ -2300,6 +2437,7 @@
                 app.interviewDate = formattedDate;
                 app.interviewTime = timeInterval;
                 saveApplications();
+                syncAppToFirestore(app);
                 renderTable();
             }
             
@@ -2453,7 +2591,23 @@
                     const confirmMsg = `This will import ${importedData.length} applications.\n\nCurrent data: ${applications.length} applications\n\nChoose import option:\n- OK = Replace all data\n- Cancel = Merge with existing data`;
                     
                     if (confirm(confirmMsg)) {
+                        const oldIds = new Set(applications.map(a => String(a.id)));
                         applications = importedData;
+                        const newIds = new Set(applications.map(a => String(a.id)));
+                        const batch = jtDb.batch();
+                        oldIds.forEach(id => {
+                            if (!newIds.has(id)) {
+                                batch.delete(jtDb.collection(JT_COLLECTION).doc(id));
+                            }
+                        });
+                        applications.forEach(app => {
+                            app.ownerId = jtAuth.currentUser.uid;
+                            batch.set(jtDb.collection(JT_COLLECTION).doc(String(app.id)), app, { merge: true });
+                        });
+                        batch.commit().catch(err => {
+                            console.error('Firestore replace-import failed:', err);
+                            alert('云端替换失败（本地已经改了，但云端没同步上）: ' + err.message);
+                        });
                         alert(`✅ Successfully replaced data!\n\nImported: ${importedData.length} applications`);
                     } else {
                         let added = 0;
@@ -2467,6 +2621,7 @@
                             if (!exists) {
                                 importApp.id = Date.now() + Math.random();
                                 applications.push(importApp);
+                                syncAppToFirestore(importApp);
                                 added++;
                             }
                         });
