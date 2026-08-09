@@ -1708,7 +1708,12 @@
             const pageApps = filteredApps.slice(startIndex, endIndex);
 
             tbody.innerHTML = pageApps.map(app => {
-                const appIdArg = JSON.stringify(String(app.id));
+                // JSON.stringify wraps string ids in double quotes; HTML-escape
+                // those quotes so they don't prematurely close the outer
+                // double-quoted onclick="..." attribute (which truncates the
+                // compiled inline handler and throws a console SyntaxError,
+                // e.g. leaving updateStatus(...) silently never called).
+                const appIdArg = JSON.stringify(String(app.id)).replace(/"/g, '&quot;');
                 let eventDisplay = '';
 
                 // Link and JD display
