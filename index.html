@@ -1376,11 +1376,20 @@
         window.jtSignIn = function () {
             const provider = new firebase.auth.GoogleAuthProvider();
             provider.setCustomParameters({ login_hint: JT_ALLOWED_EMAIL });
-            jtAuth.signInWithPopup(provider).catch(err => {
-                document.getElementById('authStatus').textContent =
-                    '登录失败: ' + err.message;
-            });
+            // signInWithRedirect instead of signInWithPopup: Chrome's default
+            // Cross-Origin-Opener-Policy blocks the popup flow's internal
+            // window.closed checks (breaks the auth handshake with cryptic
+            // console SyntaxErrors), so we do a full-page redirect instead.
+            jtAuth.signInWithRedirect(provider);
         };
+
+        // Surfaces any error from the redirect sign-in above once we're back
+        // on this page (signInWithRedirect itself can't report errors directly
+        // since it navigates away before resolving).
+        jtAuth.getRedirectResult().catch(err => {
+            document.getElementById('authStatus').textContent =
+                '登录失败: ' + err.message;
+        });
 
         jtAuth.onAuthStateChanged(user => {
             const gate = document.getElementById('authGate');
