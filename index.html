@@ -1642,6 +1642,10 @@
             localStorage.setItem('jobApplications', JSON.stringify(applications));
         }
 
+        function sameAppId(left, right) {
+            return String(left) === String(right);
+        }
+
         // renderTable function
         function renderTable() {
             const tbody = document.getElementById('jobTableBody');
@@ -1686,6 +1690,7 @@
             const pageApps = filteredApps.slice(startIndex, endIndex);
 
             tbody.innerHTML = pageApps.map(app => {
+                const appIdArg = JSON.stringify(String(app.id));
                 let eventDisplay = '';
 
                 // Link and JD display
@@ -1694,7 +1699,7 @@
                 }
                 if (app.link && app.jobDescription) eventDisplay += '<br>';
                 if (app.jobDescription) {
-                    eventDisplay += `<a href="#" onclick="viewJobDescription(${app.id}); return false;" style="color: #667eea; text-decoration: none;">📄 View JD</a>`;
+                    eventDisplay += `<a href="#" onclick="viewJobDescription(${appIdArg}); return false;" style="color: #667eea; text-decoration: none;">📄 View JD</a>`;
                 }
                 if (!app.link && !app.jobDescription) {
                     eventDisplay = '-';
@@ -1721,7 +1726,7 @@
                         eventDisplay += `
                             <div style="margin-top: 5px; font-size: 0.9em;">
                                 <strong>${eventText}:</strong> ${eventDate}${timeDisplay}
-                                <a href="#" onclick="openEditDateModal(${app.id}, '${app.interviewDate}'); return false;" style="color: #f57c00; margin-left: 5px; text-decoration: none;">(Edit)</a>
+                                <a href="#" onclick="openEditDateModal(${appIdArg}, '${app.interviewDate}'); return false;" style="color: #f57c00; margin-left: 5px; text-decoration: none;">(Edit)</a>
                             </div>`;
                     }
                 }
@@ -1737,7 +1742,7 @@
                         </td>
                         <td class="status-cell">
                             <select class="status-select status-${app.status.toLowerCase().replace(' ', '-')}" 
-                                    onchange="updateStatus(${app.id}, this.value)">
+                                    onchange="updateStatus(${appIdArg}, this.value)">
                                 <option value="Resume Ready" ${app.status === 'Resume Ready' ? 'selected' : ''}>Resume Ready</option>
                                 <option value="Applied" ${app.status === 'Applied' ? 'selected' : ''}>Applied</option>
                                 <option value="Online Assessment" ${app.status === 'Online Assessment' ? 'selected' : ''}>Online Assessment</option>
@@ -1748,7 +1753,7 @@
                             </select>
                         </td>
                         <td>
-                            <button class="btn-delete" onclick="deleteApplication(${app.id})">Delete</button>
+                            <button class="btn-delete" onclick="deleteApplication(${appIdArg})">Delete</button>
                         </td>
                     </tr>
                 `;
@@ -1763,7 +1768,7 @@
         
         // updateStatus function
         function updateStatus(id, newStatus) {
-            const app = applications.find(a => a.id === id);
+            const app = applications.find(a => sameAppId(a.id, id));
             if (app) {
                 app.status = newStatus;
                 
@@ -1778,7 +1783,9 @@
 
                     // Pre-fill existing date if available
                     const initialDate = app.interviewDate || getYYYYMMDD(new Date());
-                    
+
+                    saveApplications();
+                    syncAppToFirestore(app);
                     openEventDateModal(title, label, initialDate);
                 } else {
                     // If changing to a status that does not require a date, check if date should be cleared
@@ -1796,7 +1803,7 @@
 
         function deleteApplication(id) {
             if (confirm('Are you sure you want to delete this application?')) {
-                applications = applications.filter(a => a.id !== id);
+                applications = applications.filter(a => !sameAppId(a.id, id));
                 saveApplications();
                 deleteAppFromFirestore(id);
                 renderTable();
@@ -2360,7 +2367,7 @@
             currentAppIdForDate = id;
             currentActionType = 'edit';
 
-            const app = applications.find(a => a.id === id);
+            const app = applications.find(a => sameAppId(a.id, id));
             const title = app.status.includes('Assessment') ? 'Edit OA Deadline' : `Edit ${app.status} Date`;
             const label = app.status.includes('Assessment') ? 'Assessment Deadline' : `${app.status} Date`;
             
@@ -2376,7 +2383,7 @@
             document.getElementById('eventDateInput').value = initialDate || '';
             
             // Pre-fill time if exists
-            const app = applications.find(a => a.id === currentAppIdForDate);
+            const app = applications.find(a => sameAppId(a.id, currentAppIdForDate));
             if (app && app.interviewTime) {
                 const times = app.interviewTime.split('-');
                 document.getElementById('eventStartTime').value = times[0] || '';
@@ -2432,7 +2439,7 @@
                 }
             }
 
-            const app = applications.find(a => a.id === currentAppIdForDate);
+            const app = applications.find(a => sameAppId(a.id, currentAppIdForDate));
             if (app) {
                 app.interviewDate = formattedDate;
                 app.interviewTime = timeInterval;
@@ -2528,7 +2535,7 @@
 
         // Job Description Storage - saved for future reference
         function viewJobDescription(id) {
-            const app = applications.find(a => a.id === id);
+            const app = applications.find(a => sameAppId(a.id, id));
             if (!app || !app.jobDescription) {
                 alert('No job description found!');
                 return;
