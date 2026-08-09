@@ -1461,6 +1461,15 @@
         let currentAppIdForDate = null;
         let currentActionType = null; // 'status' or 'edit'
 
+        // Escapes a value for safe embedding inside a single-quoted JS string
+        // literal within an inline onclick="..." HTML attribute. Without this,
+        // a stray ' or \ in the data (e.g. a storage path or date string)
+        // truncates the inline handler's compiled JS, throwing a console
+        // SyntaxError and silently breaking that row's re-render.
+        function jsAttr(value) {
+            return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        }
+
         // Date utility functions
         // Format date to MM/DD/YYYY
         function formatDate(dateString) {
@@ -1735,7 +1744,7 @@
                         eventDisplay += `
                             <div style="margin-top: 5px; font-size: 0.9em;">
                                 <strong>${eventText}:</strong> ${eventDate}${timeDisplay}
-                                <a href="#" onclick="openEditDateModal(${appIdArg}, '${app.interviewDate}'); return false;" style="color: #f57c00; margin-left: 5px; text-decoration: none;">(Edit)</a>
+                                <a href="#" onclick="openEditDateModal(${appIdArg}, '${jsAttr(app.interviewDate)}'); return false;" style="color: #f57c00; margin-left: 5px; text-decoration: none;">(Edit)</a>
                             </div>`;
                     }
                 }
@@ -1745,7 +1754,7 @@
                         <td><strong>${highlightText(app.company, currentSearchTerm)}</strong></td>
                         <td>${highlightText(app.position, currentSearchTerm)}</td>
                         <td>${formatDate(app.date)}</td>
-                        <td>${app.resume ? highlightText(app.resume, currentSearchTerm) : '-'}${app.resumeStoragePath ? ` <a href="#" onclick="viewResumePdf('${app.resumeStoragePath}'); return false;" title="查看简历PDF">📄</a>` : ''}</td>
+                        <td>${app.resume ? highlightText(app.resume, currentSearchTerm) : '-'}${app.resumeStoragePath ? ` <a href="#" onclick="viewResumePdf('${jsAttr(app.resumeStoragePath)}'); return false;" title="查看简历PDF">📄</a>` : ''}</td>
                         <td class="link-cell">
                             ${eventDisplay}
                         </td>
