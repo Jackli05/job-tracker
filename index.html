@@ -596,6 +596,14 @@
             box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
         }
 
+        .btn-backup-small.btn-signout {
+            background: #757575;
+        }
+
+        .btn-backup-small.btn-signout:hover {
+            box-shadow: 0 4px 12px rgba(117, 117, 117, 0.4);
+        }
+
         .btn-backup {
             background: #4caf50;
             color: white;
@@ -1151,6 +1159,7 @@
                     📥
                 </button>
                 <input type="file" id="importFile" accept=".json" onchange="importData(event)">
+                <button class="btn-backup-small btn-signout" onclick="jtSignOut()" title="退出登录">🚪</button>
             </div>
         </div>
         
@@ -1178,6 +1187,10 @@
                     <div class="form-group">
                         <label for="resume">Resume Version</label>
                         <input type="text" id="resume" placeholder="e.g., Tech v2, Marketing, General">
+                    </div>
+                    <div class="form-group">
+                        <label for="resumeFile">Resume PDF (optional)</label>
+                        <input type="file" id="resumeFile" accept="application/pdf">
                     </div>
                     <div class="form-group">
                         <label for="link">Job Link (optional)</label>
@@ -1381,6 +1394,12 @@
             // window.closed checks (breaks the auth handshake with cryptic
             // console SyntaxErrors), so we do a full-page redirect instead.
             jtAuth.signInWithRedirect(provider);
+        };
+
+        window.jtSignOut = function () {
+            if (confirm('退出登录？')) {
+                jtAuth.signOut();
+            }
         };
 
         // Surfaces any error from the redirect sign-in above once we're back
@@ -1599,7 +1618,7 @@
         });
 
         // Handle form submission
-        document.getElementById('jobForm').addEventListener('submit', function(e) {
+        document.getElementById('jobForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             // 1. Clean whitespace
@@ -1646,11 +1665,32 @@
                 interviewTime: null // Add time field
             };
 
-            applications.unshift(newApp); 
+            // 3. Upload the resume PDF (if attached) to
+            // resumes/{ownerId}/{appId}.pdf, same layout job_tracker_client.py
+            // uses, so viewResumePdf() can resolve it later.
+            const resumeFile = document.getElementById('resumeFile').files[0];
+            if (resumeFile) {
+                const submitBtn = this.querySelector('button[type="submit"]');
+                const originalText = submitBtn.textContent;
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Uploading resume...';
+                try {
+                    const path = `resumes/${jtAuth.currentUser.uid}/${newApp.id}.pdf`;
+                    await jtStorage.ref(path).put(resumeFile);
+                    newApp.resumeStoragePath = path;
+                } catch (err) {
+                    alert('简历上传失败（申请记录本身照常保存）: ' + err.message);
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalText;
+                }
+            }
+
+            applications.unshift(newApp);
             saveApplications();
             syncAppToFirestore(newApp);
             renderTable();
-            
+
             // Reset form
             this.reset();
             document.getElementById('date').valueAsDate = new Date();
