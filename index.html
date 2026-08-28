@@ -1393,7 +1393,11 @@
             // Cross-Origin-Opener-Policy blocks the popup flow's internal
             // window.closed checks (breaks the auth handshake with cryptic
             // console SyntaxErrors), so we do a full-page redirect instead.
-            jtAuth.signInWithRedirect(provider);
+            document.getElementById('authStatus').textContent = '正在跳转到 Google 登录...';
+            jtAuth.signInWithRedirect(provider).catch(err => {
+                document.getElementById('authStatus').textContent = '登录跳转失败: ' + err.message;
+                console.error('signInWithRedirect failed:', err);
+            });
         };
 
         window.jtSignOut = function () {
