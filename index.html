@@ -1408,10 +1408,16 @@
 
         // Surfaces any error from the redirect sign-in above once we're back
         // on this page (signInWithRedirect itself can't report errors directly
-        // since it navigates away before resolving).
+        // since it navigates away before resolving). Stashed in a variable
+        // (not just written to the DOM) because onAuthStateChanged below
+        // fires right after this and would otherwise clobber the message
+        // with a generic "please sign in" before anyone can read it.
+        let jtRedirectError = null;
         jtAuth.getRedirectResult().catch(err => {
+            jtRedirectError = err;
             document.getElementById('authStatus').textContent =
                 '登录失败: ' + err.message;
+            console.error('getRedirectResult failed:', err.code, err.message);
         });
 
         jtAuth.onAuthStateChanged(user => {
@@ -1432,7 +1438,7 @@
                 btn.style.display = 'inline-block';
                 statusEl.textContent = user
                     ? `已登录 ${user.email}，但这个账号不是授权账号，换一个账号登录`
-                    : '请登录你的 Google 账号';
+                    : (jtRedirectError ? '登录失败: ' + jtRedirectError.message : '请登录你的 Google 账号');
                 if (user) jtAuth.signOut();
             }
         });
